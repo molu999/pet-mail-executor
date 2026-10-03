@@ -24,13 +24,16 @@ function validateLease(value, now) {
 async function cloud(config, path, body, fetchFn = fetch) {
   const response = await fetchFn(config.url + path, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(20000),
     headers: { authorization: 'Bearer ' + config.key, 'content-type': 'application/json' }, body: JSON.stringify(body) });
-  if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) {
+  if (!response.headers.get('content-type')?.includes('application/json')) {
     await response.body?.cancel(); throw new Error('CLOUD_HTTP');
   }
   const reader = response.body.getReader(); let size = 0; const parts = [];
   for (;;) { const { value, done } = await reader.read(); if (done) break;
     size += value.length; if (size > 100000) { await reader.cancel(); throw new Error('CLOUD_SIZE'); } parts.push(Buffer.from(value)); }
-  return JSON.parse(Buffer.concat(parts).toString('utf8'));
+  const value = JSON.parse(Buffer.concat(parts).toString('utf8'));
+  if (!response.ok) throw new Error(['CONFIG_MISMATCH','FEISHU_AUTH','FEISHU_PERMISSION','FEISHU_VERIFY'].includes(value.code)
+    ? value.code : 'CLOUD_HTTP_'+response.status);
+  return value;
 }
 function smtpFactory(config) {
   const connection = new SMTPConnection({host:'smtp.qq.com', port:465, secure:true,
@@ -65,7 +68,7 @@ async function smtp(config, lease, dependencies = {}) {
     return {status:'uncertain',error:'SMTP 提交中断，发送结果待核实。'};
   } catch (error) {
     const definite = !submitted || (Number.isInteger(error?.responseCode) && error.responseCode >= 400 && error.responseCode < 600);
-    if (!lease) throw new Error('SMTP_VERIFY');
+    if (!lease) throw new Error(error?.code === 'EAUTH' ? 'SMTP_AUTH' : 'SMTP_CONNECT');
     return definite ? {status:'failed',error:submitted?'邮件服务器明确拒绝了本次提交。':'SMTP 连接或认证失败，未提交邮件。'}
       : {status:'uncertain',error:'SMTP 提交中断，发送结果待核实。'};
   } finally { try {session.close();} catch {} }
@@ -77,6 +80,7 @@ async function execute(env = process.env, dependencies = {}) {
   const log = dependencies.log || (message => console.log(message));
   if (env.PET_EXECUTOR_TEST_SMTP === 'true') {
     await submit();
+    log('QQ SMTP TLS 连接和认证通过，未发送邮件；继续核实 Worker 和飞书。');
     const result = await api('/v1/executor/verify', {smtpFingerprint:createHash('sha256').update(config.user+'\0'+config.password).digest('hex')});
     if (!result.smtp || !result.feishu) throw new Error('VERIFICATION');
     log('QQ SMTP、Worker 连接及飞书读取验证通过；未领取任务、未发送邮件。'); return;
@@ -98,4 +102,7 @@ async function execute(env = process.env, dependencies = {}) {
   }
 }
 module.exports = {configuration,validateLease,cloud,smtp,execute};
-if (require.main === module) execute().catch(() => { console.error('执行器验证、连接或结果保存失败；请查看桌宠状态，不要重复发送。'); process.exitCode=1; });
+if (require.main === module) execute().catch(error => {
+  const safe = /^(CONFIGURATION|LEASE|SMTP_AUTH|SMTP_CONNECT|CONFIG_MISMATCH|FEISHU_AUTH|FEISHU_PERMISSION|FEISHU_VERIFY|VERIFICATION|REPORT|CLOUD_HTTP(?:_\d{3})?|CLOUD_SIZE)$/.test(error?.message) ? error.message : 'CONNECTION';
+  console.error('执行器检查失败：'+safe+'。未自动重发邮件。'); process.exitCode=1;
+});
