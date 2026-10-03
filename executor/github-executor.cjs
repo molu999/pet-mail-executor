@@ -9,8 +9,9 @@ function configuration(env) {
   if (url.protocol !== 'https:' || url.username || url.password || url.pathname !== '/' || url.search || url.hash
     || !/^[A-Za-z0-9_-]{32,128}$/.test(env.PET_EXECUTOR_KEY || '')
     || !address(env.QQ_SMTP_USER) || !/@qq\.com$/i.test(env.QQ_SMTP_USER)
-    || !env.QQ_SMTP_AUTH_CODE || /[\r\n\0]/.test(env.QQ_SMTP_AUTH_CODE)) throw new Error('CONFIGURATION');
-  return { url: url.origin, key: env.PET_EXECUTOR_KEY, user: env.QQ_SMTP_USER, password: env.QQ_SMTP_AUTH_CODE };
+    || !env.QQ_SMTP_AUTH_CODE || /[\r\n\0]/.test(env.QQ_SMTP_AUTH_CODE)
+    || env.PET_SERVICE_KEY && !/^[A-Za-z0-9_-]{32,128}$/.test(env.PET_SERVICE_KEY)) throw new Error('CONFIGURATION');
+  return { url: url.origin, key: env.PET_EXECUTOR_KEY, serviceKey:env.PET_SERVICE_KEY, user: env.QQ_SMTP_USER, password: env.QQ_SMTP_AUTH_CODE };
 }
 function validateLease(value, now) {
   if (!value || !/^feishu:[^\r\n]{1,400}:[^:\r\n]{1,200}$/.test(value.taskId)
@@ -29,10 +30,11 @@ async function cloud(config, path, body, fetchFn = fetch) {
   }
   const reader = response.body.getReader(); let size = 0; const parts = [];
   for (;;) { const { value, done } = await reader.read(); if (done) break;
-    size += value.length; if (size > 100000) { await reader.cancel(); throw new Error('CLOUD_SIZE'); } parts.push(Buffer.from(value)); }
+    size += value.length; if (size > (path.startsWith('/v1/service/')?2100000:100000)) { await reader.cancel(); throw new Error('CLOUD_SIZE'); } parts.push(Buffer.from(value)); }
   const value = JSON.parse(Buffer.concat(parts).toString('utf8'));
   if (!response.ok) throw new Error(['CONFIG_MISMATCH','FEISHU_AUTH','FEISHU_PERMISSION','FEISHU_VERIFY',
-    'RELAY_INVALID','RELAY_PERMISSION','RELAY_PENDING','RELAY_QUOTA','RELAY_NETWORK','RELAY_CAPACITY'].includes(value.code)
+    'RELAY_INVALID','RELAY_PERMISSION','RELAY_PENDING','RELAY_QUOTA','RELAY_NETWORK','RELAY_CAPACITY',
+    'SERVICE_AUTH','SERVICE_DISABLED','SERVICE_VERSION','SERVICE_STATE','SERVICE_SIZE'].includes(value.code)
     ? value.code : 'CLOUD_HTTP_'+response.status);
   return value;
 }
@@ -76,7 +78,8 @@ async function smtp(config, lease, dependencies = {}) {
 }
 async function execute(env = process.env, dependencies = {}) {
   const config = configuration(env), now = dependencies.now || Date.now;
-  const api = dependencies.cloud || ((path, body) => cloud(config, path, body));
+  const service = config.serviceKey ? await (dependencies.service || require('./service-runtime.cjs').serviceRuntime)(config,cloud) : undefined;
+  const api = dependencies.cloud || service?.api || ((path, body) => cloud(config, path, body));
   const submit = dependencies.smtp || ((lease) => smtp(config, lease, dependencies));
   const log = dependencies.log || (message => console.log(message));
   if (env.PET_EXECUTOR_TEST_SMTP === 'true') {
@@ -86,12 +89,18 @@ async function execute(env = process.env, dependencies = {}) {
     await api('/v1/executor/relay-token',{verify:true});
     const relay=await api('/v1/executor/relay-probe',{});
     if(!relay.relay)throw new Error('VERIFICATION');
-    await api('/v1/executor/relay-work',{});
-    await api('/v1/executor/relay-publish',{});
+    if(!service) {
+      await api('/v1/executor/relay-work',{});
+      await api('/v1/executor/relay-publish',{});
+    }
     const result = await api('/v1/executor/verify', {smtpFingerprint:createHash('sha256').update(config.user+'\0'+config.password).digest('hex')});
     if (!result.smtp || !result.feishu) throw new Error('VERIFICATION');
-    log('QQ SMTP、Worker 连接及飞书读取验证通过；未领取任务、未发送邮件。'); return;
+    if(service)await service.synchronize(true);
+    log('QQ SMTP、数据库连接及飞书读取验证通过；未领取任务、未发送邮件。'); return;
   }
+  // Always upload acknowledgements even when no task is due. Relay processing
+  // no longer depends on Worker Cron or on successfully claiming a mail task.
+  if(service)await service.synchronize();
   const until = now() + 180000;
   for (let i = 0; i < 50 && now() < until; i++) {
     const prepared=await api('/v1/executor/prepare',{});
@@ -115,6 +124,6 @@ async function execute(env = process.env, dependencies = {}) {
 }
 module.exports = {configuration,validateLease,cloud,smtp,execute};
 if (require.main === module) execute().catch(error => {
-  const safe = /^(CONFIGURATION|LEASE|SMTP_AUTH|SMTP_CONNECT|CONFIG_MISMATCH|FEISHU_AUTH|FEISHU_PERMISSION|FEISHU_VERIFY|RELAY_(INVALID|PERMISSION|PENDING|QUOTA|NETWORK|CAPACITY)|VERIFICATION|REPORT|CLOUD_HTTP(?:_\d{3})?|CLOUD_SIZE)$/.test(error?.message) ? error.message : 'CONNECTION';
+  const safe = /^(CONFIGURATION|LEASE|SMTP_AUTH|SMTP_CONNECT|CONFIG_MISMATCH|FEISHU_AUTH|FEISHU_PERMISSION|FEISHU_VERIFY|RELAY_(INVALID|PERMISSION|PENDING|QUOTA|NETWORK|CAPACITY)|SERVICE_(AUTH|DISABLED|VERSION|STATE|SIZE|OPERATION)|VERIFICATION|REPORT|CLOUD_HTTP(?:_\d{3})?|CLOUD_SIZE)$/.test(error?.message) ? error.message : 'CONNECTION';
   console.error('执行器检查失败：'+safe+'。未自动重发邮件。'); process.exitCode=1;
 });

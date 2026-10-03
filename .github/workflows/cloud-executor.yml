@@ -30,6 +30,7 @@ jobs:
         env:
           PET_CLOUD_URL: ${{ secrets.PET_CLOUD_URL }}
           PET_EXECUTOR_KEY: ${{ secrets.PET_EXECUTOR_KEY }}
+          PET_SERVICE_KEY: ${{ secrets.PET_SERVICE_KEY }}
           QQ_SMTP_USER: ${{ secrets.QQ_SMTP_USER }}
           QQ_SMTP_AUTH_CODE: ${{ secrets.QQ_SMTP_AUTH_CODE }}
           PET_EXECUTOR_TEST_SMTP: ${{ inputs.test_smtp }}
