@@ -1,0 +1,6 @@
+{
+  "name": "pet-mail-executor",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": { "nodemailer": "9.0.5" }
+}

@@ -1,0 +1,36 @@
+name: Cloud email executor
+on:
+  schedule:
+    - cron: "2-59/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      test_smtp:
+        description: "验证连接和授权，不领取任务、不发送邮件"
+        type: boolean
+        default: true
+permissions:
+  contents: read
+concurrency:
+  group: pet-cloud-email-executor
+  cancel-in-progress: false
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: executor/package-lock.json
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+        working-directory: executor
+      - name: Verify or execute cloud plans
+        env:
+          PET_CLOUD_URL: ${{ secrets.PET_CLOUD_URL }}
+          PET_EXECUTOR_KEY: ${{ secrets.PET_EXECUTOR_KEY }}
+          QQ_SMTP_USER: ${{ secrets.QQ_SMTP_USER }}
+          QQ_SMTP_AUTH_CODE: ${{ secrets.QQ_SMTP_AUTH_CODE }}
+          PET_EXECUTOR_TEST_SMTP: ${{ inputs.test_smtp }}
+        run: node executor/github-executor.cjs
