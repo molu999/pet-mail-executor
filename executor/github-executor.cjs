@@ -82,6 +82,8 @@ async function execute(env = process.env, dependencies = {}) {
     await submit();
     log('QQ SMTP TLS 连接和认证通过，未发送邮件；继续核实 Worker 和飞书。');
     await api('/v1/executor/prepare',{verify:true});
+    const relay=await api('/v1/executor/relay-probe',{});
+    if(!relay.relay)throw new Error('VERIFICATION');
     const result = await api('/v1/executor/verify', {smtpFingerprint:createHash('sha256').update(config.user+'\0'+config.password).digest('hex')});
     if (!result.smtp || !result.feishu) throw new Error('VERIFICATION');
     log('QQ SMTP、Worker 连接及飞书读取验证通过；未领取任务、未发送邮件。'); return;
