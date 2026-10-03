@@ -31,7 +31,8 @@ async function cloud(config, path, body, fetchFn = fetch) {
   for (;;) { const { value, done } = await reader.read(); if (done) break;
     size += value.length; if (size > 100000) { await reader.cancel(); throw new Error('CLOUD_SIZE'); } parts.push(Buffer.from(value)); }
   const value = JSON.parse(Buffer.concat(parts).toString('utf8'));
-  if (!response.ok) throw new Error(['CONFIG_MISMATCH','FEISHU_AUTH','FEISHU_PERMISSION','FEISHU_VERIFY'].includes(value.code)
+  if (!response.ok) throw new Error(['CONFIG_MISMATCH','FEISHU_AUTH','FEISHU_PERMISSION','FEISHU_VERIFY',
+    'RELAY_INVALID','RELAY_PERMISSION','RELAY_PENDING','RELAY_QUOTA','RELAY_NETWORK','RELAY_CAPACITY'].includes(value.code)
     ? value.code : 'CLOUD_HTTP_'+response.status);
   return value;
 }
@@ -108,6 +109,6 @@ async function execute(env = process.env, dependencies = {}) {
 }
 module.exports = {configuration,validateLease,cloud,smtp,execute};
 if (require.main === module) execute().catch(error => {
-  const safe = /^(CONFIGURATION|LEASE|SMTP_AUTH|SMTP_CONNECT|CONFIG_MISMATCH|FEISHU_AUTH|FEISHU_PERMISSION|FEISHU_VERIFY|VERIFICATION|REPORT|CLOUD_HTTP(?:_\d{3})?|CLOUD_SIZE)$/.test(error?.message) ? error.message : 'CONNECTION';
+  const safe = /^(CONFIGURATION|LEASE|SMTP_AUTH|SMTP_CONNECT|CONFIG_MISMATCH|FEISHU_AUTH|FEISHU_PERMISSION|FEISHU_VERIFY|RELAY_(INVALID|PERMISSION|PENDING|QUOTA|NETWORK|CAPACITY)|VERIFICATION|REPORT|CLOUD_HTTP(?:_\d{3})?|CLOUD_SIZE)$/.test(error?.message) ? error.message : 'CONNECTION';
   console.error('执行器检查失败：'+safe+'。未自动重发邮件。'); process.exitCode=1;
 });
