@@ -83,7 +83,7 @@ async function execute(env = process.env, dependencies = {}) {
     await submit();
     log('QQ SMTP TLS 连接和认证通过，未发送邮件；继续核实 Worker 和飞书。');
     await api('/v1/executor/prepare',{verify:true});
-    await api('/v1/executor/relay-token',{});
+    await api('/v1/executor/relay-token',{verify:true});
     const relay=await api('/v1/executor/relay-probe',{});
     if(!relay.relay)throw new Error('VERIFICATION');
     await api('/v1/executor/relay-work',{});
