@@ -85,6 +85,8 @@ async function execute(env = process.env, dependencies = {}) {
     await api('/v1/executor/prepare',{verify:true});
     const relay=await api('/v1/executor/relay-probe',{});
     if(!relay.relay)throw new Error('VERIFICATION');
+    await api('/v1/executor/relay-work',{});
+    await api('/v1/executor/relay-publish',{});
     const result = await api('/v1/executor/verify', {smtpFingerprint:createHash('sha256').update(config.user+'\0'+config.password).digest('hex')});
     if (!result.smtp || !result.feishu) throw new Error('VERIFICATION');
     log('QQ SMTP、Worker 连接及飞书读取验证通过；未领取任务、未发送邮件。'); return;
@@ -93,7 +95,9 @@ async function execute(env = process.env, dependencies = {}) {
   for (let i = 0; i < 50 && now() < until; i++) {
     const prepared=await api('/v1/executor/prepare',{});
     if(prepared.empty){log('本轮无可发送的到期邮件。');return;}
-    const lease = await api('/v1/executor/claim', {});
+    const relay = await api('/v1/executor/relay-probe', {});
+    if (!relay.relay) throw new Error('VERIFICATION');
+    const lease = await api('/v1/executor/claim', {relayProof:relay.proof});
     if (lease.empty) { log('本轮无可发送的到期邮件。'); return; }
     validateLease(lease, now());
     const result = await submit(lease);
