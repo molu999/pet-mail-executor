@@ -81,12 +81,15 @@ async function execute(env = process.env, dependencies = {}) {
   if (env.PET_EXECUTOR_TEST_SMTP === 'true') {
     await submit();
     log('QQ SMTP TLS 连接和认证通过，未发送邮件；继续核实 Worker 和飞书。');
+    await api('/v1/executor/prepare',{verify:true});
     const result = await api('/v1/executor/verify', {smtpFingerprint:createHash('sha256').update(config.user+'\0'+config.password).digest('hex')});
     if (!result.smtp || !result.feishu) throw new Error('VERIFICATION');
     log('QQ SMTP、Worker 连接及飞书读取验证通过；未领取任务、未发送邮件。'); return;
   }
   const until = now() + 180000;
   for (let i = 0; i < 50 && now() < until; i++) {
+    const prepared=await api('/v1/executor/prepare',{});
+    if(prepared.empty){log('本轮无可发送的到期邮件。');return;}
     const lease = await api('/v1/executor/claim', {});
     if (lease.empty) { log('本轮无可发送的到期邮件。'); return; }
     validateLease(lease, now());
